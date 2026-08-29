@@ -11,10 +11,10 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 # إعدادات الـ Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# توكن التيليجرام الخاص بك (عوضه بالتوكن الصحيح)
-TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+# التوكن الخاص بك مدرج هنا رسمياً
+TELEGRAM_BOT_TOKEN = "882394255:AAHft-MBJsqptLYBox1DWBss9MtIocFlwM4"
 
-# 1. إعداد خادم Flask البسيط لترضية منصة Render وتخلي البوت ديما يخدم
+# 1. إعداد خادم Flask البسيط لترضية منصة Render
 app = Flask(__name__)
 
 @app.route('/')
@@ -164,12 +164,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
 def main():
-    # تشغيل سيرفر Flask في خلفية منفصلة (Thread)
     flask_thread = Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
 
-    # تشغيل بوت تليجرام
     app_telegram = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app_telegram.add_handler(CommandHandler("start", start))
     app_telegram.add_handler(CommandHandler("analyze", analyze_command))
