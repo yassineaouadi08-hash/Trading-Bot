@@ -11,7 +11,8 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 # إعدادات الـ Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
  
-TELEGRAM_BOT_TOKEN = "8875065799:AAG0tXpxsgeZPsNtIFPf1JNFg7dtgTsOSGI"
+TELEGRAM_BOT_TOKEN = 8875065799:AAF5Cg7LOCUMz716JXcjp
+bRFs_G6ggsb06U
 
 # 1. إعداد خادم Flask البسيط لترضية منصة Render
 app = Flask(__name__)
