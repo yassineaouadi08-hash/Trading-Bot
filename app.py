@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Stable Crypto Bot is running 24/7!"
+    return "Direct Signal Bot is running 24/7!"
 
 TELEGRAM_TOKEN = "8943043289:AAE-Uh6rb_FAn-xE5eJl9jXcZEBQe9JtzvA"
 CHAT_ID = "6937661753"
@@ -23,7 +23,7 @@ def send_telegram_message(message, chat_id=CHAT_ID):
 
 def get_crypto_data(coin_id, name):
     try:
-        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=5"
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=2"
         response = requests.get(url, timeout=10)
         data = response.json()
         
@@ -32,7 +32,6 @@ def get_crypto_data(coin_id, name):
             
         prices = [x[1] for x in data["prices"]]
         df = pd.DataFrame(prices, columns=['close'])
-        df['open'] = df['close'].shift(1).fillna(df['close'])
         
         # مؤشر RSI
         delta = df['close'].diff()
@@ -41,34 +40,22 @@ def get_crypto_data(coin_id, name):
         rs = gain / loss
         df['rsi'] = 100 - (100 / (1 + rs))
 
-        # مؤشر MACD
-        exp1 = df['close'].ewm(span=12, adjust=False).mean()
-        exp2 = df['close'].ewm(span=26, adjust=False).mean()
-        df['MACD'] = exp1 - exp2
-        df['Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
-
-        last_row = df.iloc[-2]
         current_price = float(df['close'].iloc[-1])
-        rsi = float(last_row['rsi']) if not pd.isna(last_row['rsi']) else 50.0
-        macd = float(last_row['MACD']) if not pd.isna(last_row['MACD']) else 0.0
-        signal = float(last_row['Signal']) if not pd.isna(last_row['Signal']) else 0.0
+        rsi = float(df['rsi'].iloc[-2]) if not pd.isna(df['rsi'].iloc[-2]) else 50.0
 
-        # تحديد Long أو Short بوضوح تام
-        sentiment = "محايد ⚖️"
-        advice = "السوق عرضي، انتظر إشارة قوية."
-        if rsi < 48 and macd > signal:
-            sentiment = "إيجابي (Long مُمتاز) 🟢"
-            advice = "فرصة دخول شراء (Long) قوية حسب المؤشرات!"
-        elif rsi > 52 and macd < signal:
-            sentiment = "سلبي (Short مُمتاز) 🔴"
-            advice = "فرصة دخول بيع (Short) قوية حسب المؤشرات!"
+        # قرار صارم ومباشر بدون محايد
+        if rsi < 50:
+            sentiment = "إيجابي (فرصة Long) 🟢"
+            advice = "السعر في منطقة شراء، توجه نحو Long 🚀"
+        else:
+            sentiment = "سلبي (فرصة Short) 🔴"
+            advice = "السعر في منطقة بيع، توجه نحو Short 📉"
 
         report = (f"📊 **تحليل عملة {name}**\n\n"
                   f"💰 السعر الحالي: `{current_price:,.2f}$`\n"
-                  f"📈 RSI: `{rsi:.2f}`\n"
-                  f"📉 MACD Line: `{macd:.4f}` | Signal: `{signal:.4f}`\n\n"
-                  f"🎯 **القرار الفني:** {sentiment}\n"
-                  f"💡 **النصيحة:** {advice}")
+                  f"📈 RSI: `{rsi:.2f}`\n\n"
+                  f"🎯 **القرار:** {sentiment}\n"
+                  f"💡 **الاتجاه:** {advice}")
         return report
     except Exception as e:
         return f"خطأ في تحليل {name}: {str(e)}"
@@ -81,14 +68,7 @@ def receive_telegram():
         text = update["message"].get("text", "").strip().lower()
         
         if text == "/start":
-            reply = ("مرحباً بك يا ياسين! 🤖 البوت يشتغل بانتظام.\n\n"
-                     "الأوامر المتاحة:\n"
-                     "🔹 `/btc` - تحليل Bitcoin\n"
-                     "🔹 `/sol` - تحليل Solana\n"
-                     "🔹 `/hype` - تحليل Hyperliquid (HYPE)\n"
-                     "🔹 `/status` - تقرير شامل (Long / Short)")
-            send_telegram_message(reply, chat_id)
-            
+            send_telegram_message("مرحباً بك يا ياسين! البوت جاهز لإعطاء إشارات Long و Short مباشرة.", chat_id)
         elif text == "/btc":
             send_telegram_message(get_crypto_data('bitcoin', 'Bitcoin (BTC)'), chat_id)
         elif text == "/sol":
@@ -96,12 +76,12 @@ def receive_telegram():
         elif text == "/hype":
             send_telegram_message(get_crypto_data('hyperliquid', 'Hyperliquid (HYPE)'), chat_id)
         elif text == "/status":
-            btc_rep = get_crypto_data('bitcoin', 'Bitcoin (BTC)')
-            sol_rep = get_crypto_data('solana', 'Solana (SOL)')
-            hype_rep = get_crypto_data('hyperliquid', 'Hyperliquid (HYPE)')
-            send_telegram_message(f"🔥 **تقرير السوق الشامل (Long / Short)**:\n\n{btc_rep}\n\n------------------\n\n{sol_rep}\n\n------------------\n\n{hype_rep}", chat_id)
+            btc = get_crypto_data('bitcoin', 'Bitcoin (BTC)')
+            sol = get_crypto_data('solana', 'Solana (SOL)')
+            hype = get_crypto_data('hyperliquid', 'Hyperliquid (HYPE)')
+            send_telegram_message(f"🔥 **قرارات السوق المباشرة (Long / Short)**:\n\n{btc}\n\n---\n\n{sol}\n\n---\n\n{hype}", chat_id)
         else:
-            send_telegram_message("عذراً، استعمل الأوامر التالية:\n/btc, /sol, /hype, /status", chat_id)
+            send_telegram_message("استعمل الأوامر: /btc, /sol, /hype, /status", chat_id)
             
     return "OK", 200
 
