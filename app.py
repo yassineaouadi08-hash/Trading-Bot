@@ -2,7 +2,6 @@ from flask import Flask
 import threading
 import ccxt
 import pandas as pd
-import pandas_ta as ta
 import requests
 import time
 
@@ -10,7 +9,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Multi-Coin Trading Bot is running 24/7!"
+    return "Trading Bot is running 24/7!"
 
 TELEGRAM_TOKEN = "8943043289:AAE-Uh6rb_FAn-xE5eJl9jXcZEBQe9JtzvA"
 CHAT_ID = "6937661753"
@@ -33,9 +32,18 @@ def analyze_market():
                 bars = exchange.fetch_ohlcv(symbol, timeframe='15m', limit=100)
                 df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 
-                df['rsi'] = ta.rsi(df['close'], length=14)
-                macd = ta.macd(df['close'])
-                df = pd.concat([df, macd], axis=1)
+                # حساب RSI بالرياضيات البحتة عبر pandas
+                delta = df['close'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                rs = gain / loss
+                df['rsi'] = 100 - (100 / (1 + rs))
+
+                # حساب MACD
+                exp1 = df['close'].ewm(span=12, adjust=False).mean()
+                exp2 = df['close'].ewm(span=26, adjust=False).mean()
+                df['MACD_12_26_9'] = exp1 - exp2
+                df['MACDs_12_26_9'] = df['MACD_12_26_9'].ewm(span=9, adjust=False).mean()
 
                 df['prev_open'] = df['open'].shift(1)
                 df['prev_close'] = df['close'].shift(1)
@@ -90,9 +98,9 @@ def analyze_market():
             except Exception as e:
                 print(f"Error analyzing {symbol}:", e)
                 
-            time.sleep(5) # فاصل زمني قصير بين العملة والثانية لتفادي ضغط الطلبات
+            time.sleep(5)
             
-        time.sleep(900) # ينتظر 15 دقيقة قبل إعادة الفحص للعملات الكل
+        time.sleep(900)
 
 threading.Thread(target=analyze_market, daemon=True).start()
 
