@@ -1,6 +1,5 @@
 from flask import Flask, request
 import threading
-import yfinance as yf
 import pandas as pd
 import requests
 import time
@@ -9,7 +8,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Yahoo Finance Trading Bot is running 24/7!"
+    return "Crypto Trading Bot with HYPE is running 24/7!"
 
 TELEGRAM_TOKEN = "8943043289:AAE-Uh6rb_FAn-xE5eJl9jXcZEBQe9JtzvA"
 CHAT_ID = "6937661753"
@@ -22,31 +21,32 @@ def send_telegram_message(message, chat_id=CHAT_ID):
     except Exception as e:
         print("Telegram Error:", e)
 
-def get_market_analysis(ticker, name):
+def get_coingecko_analysis(coin_id, symbol_name):
     try:
-        # جلب البيانات عبر Yahoo Finance (بدون قيود جغرافية)
-        df = yf.download(ticker, period="5d", interval="15m", progress=False)
-        if df.empty:
-            return f"لا توجد بيانات متاحة حالياً لـ {name}"
+        # جلب البيانات التاريخية للأسعار مباشرة من CoinGecko (بدون حظر جغرافي)
+        url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart?vs_currency=usd&days=5"
+        response = requests.get(url, timeout=10)
+        data = response.json()
         
-        # تصحيح أعمدة البيانات إذا جاءت مزدوجة
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-
-        df['close'] = df['Close']
-        df['open'] = df['Open']
+        if "prices" not in data:
+            return f"لا توجد بيانات متاحة لـ {symbol_name}"
+            
+        prices = [x[1] for x in data["prices"]]
+        df = pd.DataFrame(prices, columns=['close'])
+        df['open'] = df['close'].shift(1).fillna(df['close'])
         
-        # حساب المؤشرات
+        # حساب RSI مبسط
         delta = df['close'].diff()
         gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
         loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
         rs = gain / loss
         df['rsi'] = 100 - (100 / (1 + rs))
 
+        # حساب MACD مبسط
         exp1 = df['close'].ewm(span=12, adjust=False).mean()
         exp2 = df['close'].ewm(span=26, adjust=False).mean()
-        df['MACD_12_26_9'] = exp1 - exp2
-        df['MACDs_12_26_9'] = df['MACD_12_26_9'].ewm(span=9, adjust=False).mean()
+        df['MACD'] = exp1 - exp2
+        df['Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
 
         df['prev_open'] = df['open'].shift(1)
         df['prev_close'] = df['close'].shift(1)
@@ -62,33 +62,32 @@ def get_market_analysis(ticker, name):
                                   (df['close'] <= df['prev_open'])
 
         last_row = df.iloc[-2]
-        current_price = float(last_row['close'])
-        rsi = float(last_row['rsi'])
-        macd = float(last_row['MACD_12_26_9'])
-        signal = float(last_row['MACDs_12_26_9'])
+        current_price = float(df['close'].iloc[-1])
+        rsi = float(last_row['rsi']) if not pd.isna(last_row['rsi']) else 50.0
+        macd = float(last_row['MACD']) if not pd.isna(last_row['MACD']) else 0.0
+        signal = float(last_row['Signal']) if not pd.isna(last_row['Signal']) else 0.0
         is_bullish = bool(last_row['bullish_engulfing'])
         is_bearish = bool(last_row['bearish_engulfing'])
 
+        # تحديد التوصية (Long أو Short)
         sentiment = "محايد ⚖️"
-        advice = "الوضع غير واضح، انتظر حتى تتوفر شروط قوية."
-        if rsi < 40 and macd > signal and is_bullish:
-            sentiment = "إيجابي قوي (Long مُمتاز) 🟢"
-            advice = "الشروط توحي بفرصة شراْء (Long) ناجحة!"
-        elif rsi > 60 and macd < signal and is_bearish:
-            sentiment = "سلبي قوي (Short مُمتاز) 🔴"
-            advice = "الشروط توحي بفرصة بيع (Short) ناجحة!"
+        advice = "الوضع عرضي، انتظر تأكيد الإشارة."
+        if rsi < 45 and macd > signal:
+            sentiment = "إيجابي (Long مُمتاز) 🟢"
+            advice = "المؤشرات توحي بفرصة صعود ودخول (Long)!"
+        elif rsi > 55 and macd < signal:
+            sentiment = "سلبي (Short مُمتاز) 🔴"
+            advice = "المؤشرات توحي بفرصة هبوط ودخول (Short)!"
 
-        report = (f"📊 **تحليل عملة {name}**\n\n"
-                  f"💰 السعر الحالي: `{current_price:.2f}`\n"
+        report = (f"📊 **تحليل عملة {symbol_name}**\n\n"
+                  f"💰 السعر الحالي: `{current_price:,.4f}$`\n"
                   f"📈 RSI: `{rsi:.2f}`\n"
-                  f"📉 MACD Line: `{macd:.4f}` | Signal: `{signal:.4f}`\n"
-                  f"🕯 شمعة ابتلاعية شرائية: `{'نعم ✅' if is_bullish else 'لا ❌'}`\n"
-                  f"🕯 شمعة ابتلاعية بيعية: `{'نعم ✅' if is_bearish else 'لا ❌'}`\n\n"
-                  f"🎯 **التقييم:** {sentiment}\n"
-                  f"💡 **الرأي الفني:** {advice}")
+                  f"📉 MACD Line: `{macd:.4f}` | Signal: `{signal:.4f}`\n\n"
+                  f"🎯 **القرار الفني:** {sentiment}\n"
+                  f"💡 **النصيحة:** {advice}")
         return report
     except Exception as e:
-        return f"خطأ في جلب بيانات {name}: {str(e)}"
+        return f"خطأ في تحليل {symbol_name}: {str(e)}"
 
 @app.route(f'/{TELEGRAM_TOKEN}', methods=['POST'])
 def receive_telegram():
@@ -98,27 +97,27 @@ def receive_telegram():
         text = update["message"].get("text", "").strip().lower()
         
         if text == "/start":
-            reply = ("مرحباً بك يا ياسين! 🤖 تم تحديث البوت ليعمل عبر Yahoo Finance بدون أي قيود جغرافية.\n\n"
+            reply = ("مرحباً بك يا ياسين في بوت التداول المطور!\n\n"
                      "الأوامر المتاحة:\n"
-                     "🔹 `/btc` - تحليل شامل للـ Bitcoin\n"
-                     "🔹 `/sol` - تحليل شامل للـ Solana\n"
-                     "🔹 `/eth` - تحليل شامل للـ Ethereum\n"
-                     "🔹 `/status` - حالة السوق العامة وما إذا كان Long أو Short أفضل")
+                     "🔹 `/btc` - تحليل Bitcoin\n"
+                     "🔹 `/sol` - تحليل Solana\n"
+                     "🔹 `/hype` - تحليل عملة Hype الفوري\n"
+                     "🔹 `/status` - تقرير شامل لجميع العملات (Long أو Short)")
             send_telegram_message(reply, chat_id)
             
         elif text == "/btc":
-            send_telegram_message(get_market_analysis('BTC-USD', 'Bitcoin'), chat_id)
+            send_telegram_message(get_coingecko_analysis('bitcoin', 'Bitcoin (BTC)'), chat_id)
         elif text == "/sol":
-            send_telegram_message(get_market_analysis('SOL-USD', 'Solana'), chat_id)
-        elif text == "/eth":
-            send_telegram_message(get_market_analysis('ETH-USD', 'Ethereum'), chat_id)
+            send_telegram_message(get_coingecko_analysis('solana', 'Solana (SOL)'), chat_id)
+        elif text == "/hype":
+            send_telegram_message(get_coingecko_analysis('hyperliquid', 'Hyperliquid (HYPE)'), chat_id)
         elif text == "/status":
-            btc_rep = get_market_analysis('BTC-USD', 'Bitcoin')
-            sol_rep = get_market_analysis('SOL-USD', 'Solana')
-            eth_rep = get_market_analysis('ETH-USD', 'Ethereum')
-            send_telegram_message(f"تقرير شامل لسوق العملات:\n\n{btc_rep}\n\n------------------\n\n{sol_rep}\n\n------------------\n\n{eth_rep}", chat_id)
+            btc_rep = get_coingecko_analysis('bitcoin', 'Bitcoin (BTC)')
+            sol_rep = get_coingecko_analysis('solana', 'Solana (SOL)')
+            hype_rep = get_coingecko_analysis('hyperliquid', 'Hyperliquid (HYPE)')
+            send_telegram_message(f"🔥 **تقرير السوق الشامل (Long / Short)**:\n\n{btc_rep}\n\n------------------\n\n{sol_rep}\n\n------------------\n\n{hype_rep}", chat_id)
         else:
-            send_telegram_message("عذراً، لم أفهم طلبك. استعمل الأوامر الآتية:\n/btc, /sol, /eth, /status", chat_id)
+            send_telegram_message("عذراً، استعمل الأوامر التالية:\n/btc, /sol, /hype, /status", chat_id)
             
     return "OK", 200
 
