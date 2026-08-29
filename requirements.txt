@@ -1,6 +1,4 @@
 flask
-pandas
-numpy
-python-telegram-bot
-requests
 ccxt
+pandas
+requests
