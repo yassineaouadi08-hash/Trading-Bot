@@ -5,8 +5,8 @@ import pandas_ta as ta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-TOKEN = os.getenv("8971401995: AAErEwwoauKH_noctI2Xm
-WE1noVNDu7ELx4")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+
 exchange = ccxt.bybit() # أو ccxt.binance()
 
 # قائمة العملات المحددة والـ Hype
