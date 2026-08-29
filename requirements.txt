@@ -4,4 +4,3 @@ numpy
 python-telegram-bot
 requests
 ccxt
-pandas-ta
