@@ -10,16 +10,15 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
 
 # إعدادات الـ Logging
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-
-# التوكن الخاص بك مدرج هنا رسمياً
-TELEGRAM_BOT_TOKEN = "882394255:AAHft-MBJsqptLYBox1DWBss9MtIocFlwM4"
+ 
+TELEGRAM_BOT_TOKEN = "8875065799:AAG0tXpxsgeZPsNtIFPf1JNFg7dtgTsOSGI"
 
 # 1. إعداد خادم Flask البسيط لترضية منصة Render
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Trading Bot is running!"
+    return "Bot is running!"
 
 @app.route('/health')
 def health():
