@@ -1,10 +1,19 @@
-import os
+from flask import Flask
+import threading
 import ccxt
 import pandas as pd
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import requests
+import time
 
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Trading Bot is running 24/7!"
+
+TELEGRAM_TOKEN = "8971401995: AAErEwwoauKH_noctI2Xm
+WE1noVNDu7ELx4"
+CHAT_ID = "6937661753"
 
 exchange = ccxt.bybit()
 
@@ -15,7 +24,7 @@ def fetch_and_analyze(symbol: str, timeframe: str = '15m'):
         ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         
-        # حساب المؤشرات الفنية بـ pandas البسيطة (بدون pandas_ta لتفادي مشاكل السرفر)
+        # حساب المؤشرات الفنية بـ pandas البسيطة
         df['EMA_20'] = df['close'].ewm(span=20, adjust=False).mean()
         df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
         df['EMA_200'] = df['close'].ewm(span=200, adjust=False).mean()
