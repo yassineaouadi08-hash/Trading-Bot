@@ -1,179 +1,126 @@
 import os
-import requests
+import ccxt
 import pandas as pd
-import numpy as np
-import logging
-from flask import Flask
-from threading import Thread
+import pandas_ta as ta
 from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# إعدادات الـ Logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
- 
-TELEGRAM_BOT_TOKEN = os.environ.get("8875065799:AAF5Cg7LOCUMz716JXcjp
-bRFs_G6ggsb06U")
+TOKEN = os.getenv("8971401995: AAErEwwoauKH_noctI2Xm
+WE1noVNDu7ELx4")
+exchange = ccxt.bybit() # أو ccxt.binance()
 
-# 1. إعداد خادم Flask البسيط لترضية منصة Render
-app = Flask(__name__)
+# قائمة العملات المحددة والـ Hype
+DEFAULT_PAIRS = ['BTC/USDT', 'SOL/USDT', 'PEPE/USDT', 'DOGE/USDT']
 
-@app.route('/')
-def home():
-    return "Bot is running!"
-
-@app.route('/health')
-def health():
-    return "OK"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
-# 2. وظائف جلب وتحليل البيانات (Binance & Bybit)
-def fetch_binance_data(symbol, interval):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit=100"
+def fetch_and_analyze(symbol: str, timeframe: str = '15m'):
     try:
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        if isinstance(data, list) and len(data) > 0:
-            df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'close_time', 'quote_asset_volume', 'number_of_trades', 'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'])
-            df['close'] = df['close'].astype(float)
-            df['high'] = df['high'].astype(float)
-            df['low'] = df['low'].astype(float)
-            df['volume'] = df['volume'].astype(float)
-            return df
-        return None
+        # 1. جلب بيانات الشموع (OHLCV)
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=100)
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        
+        # 2. حساب المؤشرات الفنية
+        df['EMA_20'] = ta.ema(df['close'], length=20)
+        df['EMA_50'] = ta.ema(df['close'], length=50)
+        df['EMA_200'] = ta.ema(df['close'], length=200)
+        df['RSI'] = ta.rsi(df['close'], length=14)
+        macd = ta.macd(df['close'])
+        df['MACD'] = macd['MACD_12_26_9']
+        df['MACD_signal'] = macd['MACDs_12_26_9']
+        df['ATR'] = ta.atr(df['high'], df['low'], df['close'], length=14)
+        
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
+        
+        # 3. تحليل الشموع اليابانية (Candlestick Patterns)
+        bullish_engulfing = (prev['close'] < prev['open']) and (last['close'] > last['open']) and (last['close'] > prev['open'])
+        bearish_engulfing = (prev['close'] > prev['open']) and (last['close'] < last['open']) and (last['close'] < prev['open'])
+        pinbar_bull = (last['high'] - last['low']) > 3 * abs(last['close'] - last['open']) and (last['close'] - last['low']) > 0.6 * (last['high'] - last['low'])
+
+        # 4. تطبيق نظام التقييم (Scoring System)
+        score = 0
+        reasons = []
+
+        # Trend Score (20 pts)
+        if last['close'] > last['EMA_50'] > last['EMA_200']:
+            score += 20
+            reasons.append("✅ Trend صاعد فوق EMA 50/200 (+20)")
+        elif last['close'] < last['EMA_50'] < last['EMA_200']:
+            score -= 20
+            reasons.append("🛑 Trend هابط تحت EMA 50/200 (-20)")
+
+        # Candlestick Score (15 pts)
+        if bullish_engulfing or pinbar_bull:
+            score += 15
+            reasons.append("✅ شمعة انعكاسية صاعدة Bullish Pattern (+15)")
+        elif bearish_engulfing:
+            score -= 15
+            reasons.append("🛑 شمعة بيعية قوية Bearish Engulfing (-15)")
+
+        # RSI Score (10 pts)
+        if 40 <= last['RSI'] <= 60:
+            score += 10
+            reasons.append(f"✅ RSI متوازن ({last['RSI']:.1f}) (+10)")
+        elif last['RSI'] > 70:
+            score -= 10
+            reasons.append(f"🛑 تشبع شرائي RSI Overbought ({last['RSI']:.1f}) (-10)")
+
+        # MACD Score (10 pts)
+        if last['MACD'] > last['MACD_signal']:
+            score += 10
+            reasons.append("✅ تقاطع إيجابي MACD Bullish Cross (+10)")
+
+        # 5. تحديد القرار وإدارة المخاطر (SL / TP)
+        close_price = last['close']
+        atr_val = last['ATR']
+        
+        if score >= 35:
+            signal = "🟢 Strong LONG"
+            sl = close_price - (1.5 * atr_val)
+            tp = close_price + (3.0 * atr_val)
+        elif score <= -30:
+            signal = "🔴 Strong SHORT"
+            sl = close_price + (1.5 * atr_val)
+            tp = close_price - (3.0 * atr_val)
+        else:
+            signal = "⚪ WAIT / NO CLEAR ENTRY"
+            sl, tp = 0, 0
+
+        rr = round(abs(tp - close_price) / abs(close_price - sl), 2) if sl > 0 else 0
+
+        # صياغة التقرير النهائي
+        report = f"📊 **تحليل العملة: {symbol} ({timeframe})**\n\n"
+        report += f"🎯 **القرار:** {signal}\n"
+        report += f"📈 **السعر الحالي:** {close_price:.4f}\n"
+        if sl > 0:
+            report += f"🛑 **Stop Loss (SL):** {sl:.4f}\n"
+            report += f"🎯 **Take Profit (TP):** {tp:.4f}\n"
+            report += f"⚖️ **Risk/Reward:** 1:{rr}\n\n"
+        
+        report += "🔍 **تفاصيل التحليل:**\n" + "\n".join(reasons)
+        return report
+
     except Exception as e:
-        logging.error(f"Binance Error: {e}")
-        return None
+        return f"حدث خطأ أثناء تحليل {symbol}: {str(e)}"
 
-def fetch_bybit_data(symbol, interval):
-    url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={symbol}&interval={interval}&limit=100"
-    try:
-        response = requests.get(url, timeout=10)
-        data = response.json()
-        if data.get('retCode') == 0 and len(data['result']['list']) > 0:
-            list_data = data['result']['list']
-            list_data.reverse()
-            df = pd.DataFrame(list_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'turnover'])
-            df['close'] = df['close'].astype(float)
-            df['high'] = df['high'].astype(float)
-            df['low'] = df['low'].astype(float)
-            df['volume'] = df['volume'].astype(float)
-            return df
-        return None
-    except Exception as e:
-        logging.error(f"Bybit Error: {e}")
-        return None
+# أوامر التليجرام
+async def scan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("جاري تحليل BTC, SOL والعملات الـ Hype...")
+    for pair in DEFAULT_PAIRS:
+        result = fetch_and_analyze(pair, timeframe='15m')
+        await update.message.reply_text(result, parse_mode='Markdown')
 
-def calculate_indicators(df):
-    df['EMA20'] = df['close'].ewm(span=20, adjust=False).mean()
-    df['EMA50'] = df['close'].ewm(span=50, adjust=False).mean()
-    df['EMA200'] = df['close'].ewm(span=200, adjust=False).mean()
-    
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
-    df['RSI'] = 100 - (100 / (1 + rs))
-    
-    return df
-
-def analyze_market(df):
-    score = 50 
-    reasons = []
-    last_row = df.iloc[-1]
-    
-    if last_row['close'] > last_row['EMA20'] and last_row['EMA20'] > last_row['EMA50']:
-        score += 25
-        reasons.append("✅ Strong Bullish Trend (Price > EMA20 > EMA50)")
-    elif last_row['close'] > last_row['EMA50']:
-        score += 15
-        reasons.append("✅ Price above EMA 50")
+async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.args:
+        symbol = context.args[0].upper() + "/USDT"
+        tf = context.args[1] if len(context.args) > 1 else '15m'
+        result = fetch_and_analyze(symbol, timeframe=tf)
+        await update.message.reply_text(result, parse_mode='Markdown')
     else:
-        score -= 20
-        reasons.append("❌ Bearish Trend (Price below key EMAs)")
+        await update.message.reply_text("الرجاء تحديد العملة، مثال:\n`/analyze SOL 15m`", parse_mode='Markdown')
 
-    rsi = last_row['RSI']
-    if 45 <= rsi <= 65:
-        score += 10
-        reasons.append(f"ℹ️ RSI in healthy zone ({rsi:.1f})")
-    elif rsi < 35:
-        score += 15
-        reasons.append(f"🟢 RSI Oversold / Buying opportunity ({rsi:.1f})")
-    elif rsi > 65:
-        score -= 10
-        reasons.append(f"🔴 RSI getting overbought ({rsi:.1f})")
-
-    if score >= 75:
-        signal = "🚀 Strong LONG (فرصة قوية صعود)"
-    elif 60 <= score < 75:
-        signal = "📈 LONG (دخول صفقة شراء)"
-    elif 45 <= score < 60:
-        signal = "⏳ WAIT (السوق محايد، انتظر تأكيد)"
-    elif 30 <= score < 44:
-        signal = "📉 SHORT (دخول صفقة بيع)"
-    else:
-        signal = "🩸 Strong SHORT (فرصة قوية نزول)"
-
-    return signal, score, reasons
-
-# 3. أوامر التيليجرام
-async def analyze_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    if len(args) < 2:
-        await update.message.reply_text("⚠️ مثال للاستخدام:\n`/analyze BTCUSDT 15`\n`/analyze SOLUSDT 1h`", parse_mode="Markdown")
-        return
-    
-    symbol = args[0].upper()
-    interval = args[1]
-    if not symbol.endswith("USDT"):
-        symbol += "USDT"
-    
-    df = fetch_binance_data(symbol, interval)
-    if df is None:
-        df = fetch_bybit_data(symbol, interval)
-
-    if df is None:
-        await update.message.reply_text(f"❌ لم يتم العثور على بيانات للعملة {symbol}.")
-        return
-
-    df = calculate_indicators(df)
-    signal, score, reasons = analyze_market(df)
-    current_price = df.iloc[-1]['close']
-
-    response_msg = (
-        f"📊 **تقرير تحليل السوق**\n"
-        f"🪙 **العملة:** `{symbol}` | **الفريم:** `{interval}`\n\n"
-        f"🎯 **الإشارة:** **{signal}**\n"
-        f"⭐ **الـ Score:** `{score} / 100`\n"
-        f"💵 **السعر الحالي:** `{current_price}`\n\n"
-        f"📋 **الأسباب الفنية:**\n" + "\n".join(reasons)
-    )
-    
-    await update.message.reply_text(response_msg, parse_mode="Markdown")
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = (
-        "🤖 أهلاً بك يا ياسين في بوت التحليل الذكي!\n\n"
-        "للتحليل، استعمل الأمر:\n"
-        "🔹 `/analyze BTCUSDT 15`\n"
-        "🔹 `/analyze SOLUSDT 1h`\n"
-        "🔹 `/analyze HYPEUSDT 4h`\n"
-    )
-    await update.message.reply_text(welcome_text, parse_mode="Markdown")
-
-def main():
-    flask_thread = Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-
-    app_telegram = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    app_telegram.add_handler(CommandHandler("start", start))
-    app_telegram.add_handler(CommandHandler("analyze", analyze_command))
-    
-    print("Telegram Bot & Flask Server are running...")
-    app_telegram.run_polling()
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    app = ApplicationBuilder().token(TOKEN).build()
+    app.add_handler(CommandHandler("scan", scan))
+    app.add_handler(CommandHandler("analyze", analyze))
+    print("Bot started...")
+    app.run_polling()
