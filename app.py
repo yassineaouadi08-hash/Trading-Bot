@@ -24,7 +24,8 @@ def send_telegram_message(message, chat_id=CHAT_ID):
 
 def get_market_analysis(symbol):
     try:
-        exchange = ccxt.bybit()
+        # استبدال Bybit بـ Binance لتجنب الحظر الجغرافي على سيرفرات Render
+        exchange = ccxt.binance()
         bars = exchange.fetch_ohlcv(symbol, timeframe='15m', limit=100)
         df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         
@@ -61,7 +62,6 @@ def get_market_analysis(symbol):
         is_bullish = last_row['bullish_engulfing']
         is_bearish = last_row['bearish_engulfing']
 
-        # تقييم السوق
         sentiment = "محايد ⚖️"
         advice = "الوضع غير واضح، انتظر حتى تتوفر شروط قوية."
         if rsi < 40 and macd > signal and is_bullish:
@@ -83,13 +83,12 @@ def get_market_analysis(symbol):
     except Exception as e:
         return f"خطأ في جلب بيانات {symbol}: {str(e)}"
 
-# حلقة المراقبة التلقائية (تشتغل في الخلفية)
 def background_monitor():
-    symbols = ['BTC/USDT', 'SOL/USDT', 'HYPE/USDT']
+    symbols = ['BTC/USDT', 'SOL/USDT', 'BNB/USDT']
     while True:
         for symbol in symbols:
             try:
-                exchange = ccxt.bybit()
+                exchange = ccxt.binance()
                 bars = exchange.fetch_ohlcv(symbol, timeframe='15m', limit=100)
                 df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 
@@ -135,7 +134,6 @@ def background_monitor():
 
 threading.Thread(target=background_monitor, daemon=True).start()
 
-# استقبال رسائل وأوامر التيليجرام
 @app.route(f'/{TELEGRAM_TOKEN}', methods=['POST'])
 def receive_telegram():
     update = request.get_json()
@@ -148,7 +146,7 @@ def receive_telegram():
                      "الأوامر المتاحة:\n"
                      "🔹 `/btc` - تحليل شامل للـ Bitcoin\n"
                      "🔹 `/sol` - تحليل شامل للـ Solana\n"
-                     "🔹 `/hype` - تحليل شامل للـ Hype\n"
+                     "🔹 `/bnb` - تحليل شامل للـ BNB\n"
                      "🔹 `/status` - حالة السوق العامة وما إذا كان Long أو Short أفضل")
             send_telegram_message(reply, chat_id)
             
@@ -156,15 +154,15 @@ def receive_telegram():
             send_telegram_message(get_market_analysis('BTC/USDT'), chat_id)
         elif text == "/sol":
             send_telegram_message(get_market_analysis('SOL/USDT'), chat_id)
-        elif text == "/hype":
-            send_telegram_message(get_market_analysis('HYPE/USDT'), chat_id)
+        elif text == "/bnb":
+            send_telegram_message(get_market_analysis('BNB/USDT'), chat_id)
         elif text == "/status":
             btc_rep = get_market_analysis('BTC/USDT')
             sol_rep = get_market_analysis('SOL/USDT')
-            hype_rep = get_market_analysis('HYPE/USDT')
-            send_telegram_message(f"تقرير شامل لسوق العملات:\n\n{btc_rep}\n\n------------------\n\n{sol_rep}\n\n------------------\n\n{hype_rep}", chat_id)
+            bnb_rep = get_market_analysis('BNB/USDT')
+            send_telegram_message(f"تقرير شامل لسوق العملات:\n\n{btc_rep}\n\n------------------\n\n{sol_rep}\n\n------------------\n\n{bnb_rep}", chat_id)
         else:
-            send_telegram_message("عذراً، لم أفهم طلبك. استعمل الأوامر الآتية:\n/btc, /sol, /hype, /status", chat_id)
+            send_telegram_message("عذراً، لم أفهم طلبك. استعمل الأوامر الآتية:\n/btc, /sol, /bnb, /status", chat_id)
             
     return "OK", 200
 
